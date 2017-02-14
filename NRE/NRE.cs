@@ -192,6 +192,13 @@ namespace cAlgo.Robots
 
             }
 
+            //If we have no pending ordes or positions open we need to setup next newstrade (switch _ordersCreated to false)
+            if (_ordersCreated && !PendingOrders.Any(o => o.Label == Label) && (Positions.Count == 0))
+            {
+                Log("Resuming Order operations");
+                _ordersCreated = false;
+            }
+
             //If we have a market order and it is active then leave. This is really Ugly....
             if (_ordersCreated && (Positions.Count > 0))
             {
@@ -241,12 +248,7 @@ namespace cAlgo.Robots
                 }
             }
 
-            //If we have no pending ordes or positions open we need to setup next newstrade (switch _ordersCreated to false)
-            if (_ordersCreated && !PendingOrders.Any(o => o.Label == Label) && (Positions.Count == 0))
-            {
-                Log("Resuming Order operations");
-                _ordersCreated = false;
-            }
+
         }
 
         private void updateSL()
