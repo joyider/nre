@@ -30,7 +30,7 @@ using HorizontalAlignment = cAlgo.API.HorizontalAlignment;
 
 namespace cAlgo.Robots
 {
-    [Robot(TimeZone = TimeZones.WEuropeStandardTime, AccessRights = AccessRights.FullAccess)]
+    [Robot(TimeZone = TimeZones.NCentralAsiaStandardTime, AccessRights = AccessRights.FullAccess)]
     public class NRE : Robot, ILogger
     {
         private SymbolWrapper _symbol;
@@ -40,8 +40,10 @@ namespace cAlgo.Robots
         private NewsItem NI;
         public bool SymbolFilter = true;
         public int Position = (int)StaticPosition.TopLeft;
-
         private bool isTrigerred;
+
+        [Parameter(DefaultValue = false)]
+        public bool ShowNewsOnly { get; set; }
 
         [Parameter(DefaultValue = "1337")]
         public string Label { get; set; }
@@ -61,7 +63,7 @@ namespace cAlgo.Robots
         [Parameter(DefaultValue = true)]
         public bool ShowPastNews { get; set; }
 
-        [Parameter(DefaultValue = 3)]
+        [Parameter(DefaultValue = 1)]
         public int PastNewsLookback { get; set; }
 
         // When the stop order becomes a market order (pips away from news time)
@@ -101,7 +103,6 @@ namespace cAlgo.Robots
 
         private DateTime _triggerTimeInServerTimeZone;
 
-        //private const string Label = "News Robot";
 
         protected override void OnStart()
         {
@@ -117,6 +118,7 @@ namespace cAlgo.Robots
                 var downloader = new DailyFxDownloader(this);
                 var allNewsItems = downloader.Download(PastNewsLookback);
 
+
                 Log(string.Format("{0} events loaded", allNewsItems.Count));
 
                 _symbol = new SymbolWrapper(Symbol.Code);
@@ -129,8 +131,9 @@ namespace cAlgo.Robots
                 Log("{0} groups created", _groups.Count);
             } catch (Exception e)
             {
-                Log("Exception: {0}", e.Message);
+                Log("Exception1: {0}", e.Message);
                 _newsItems = new List<NewsItem>();
+
             }
 
             //On a new position check One Cancle Other
@@ -141,10 +144,13 @@ namespace cAlgo.Robots
             try
             {
                 NI = DisplayUpcomingNews();
-                _triggerTimeInServerTimeZone = NI.UtcDateTime.Add(TimeZone.BaseUtcOffset);
+                TimeSpan ts = new TimeSpan(0, 4, 0, 0);
+                TimeSpan ts2 = ts.Add(System.TimeZoneInfo.Local.BaseUtcOffset).Add(TimeZone.BaseUtcOffset);
+                Log("Offset from Local: {0}", ts2);
+                _triggerTimeInServerTimeZone = NI.UtcDateTime.Add(ts2);
             } catch (Exception e)
             {
-                Log("Exception: {0}", e.Message);
+                Log("Exception2: {0}", e.Message);
             }
 
         }
@@ -160,17 +166,20 @@ namespace cAlgo.Robots
                 NI = DisplayUpcomingNews();
             } catch (Exception e)
             {
-                Log("Exception: {0}", e.Message);
+                Log("Exception3: {0}", e.Message);
             }
 
             //If we have an order we can che
-            try
+            if (!ShowNewsOnly)
             {
-                var remainingTime = _triggerTimeInServerTimeZone - Server.Time;
-                DrawRemainingTime(remainingTime);
-            } catch (Exception e)
-            {
-                Log("Exception: {0}", e.Message);
+                try
+                {
+                    var remainingTime = _triggerTimeInServerTimeZone - Server.Time;
+                    DrawRemainingTime(remainingTime);
+                } catch (Exception e)
+                {
+                    Log("Exception4: {0}", e.Message);
+                }
             }
 
             if (ShowPastNews)
@@ -193,7 +202,7 @@ namespace cAlgo.Robots
             }
 
             //If we have no pending ordes or positions open we need to setup next newstrade (switch _ordersCreated to false)
-            if (_ordersCreated && !PendingOrders.Any(o => o.Label == Label) && (Positions.Count == 0))
+            if (_ordersCreated && !PendingOrders.Any(o => o.Label == Label) && ((Positions.FindAll(Label, Symbol, TradeType.Buy).Length + Positions.FindAll(Label, Symbol, TradeType.Sell).Length) == 0))
             {
                 Log("Resuming Order operations");
                 _ordersCreated = false;
@@ -211,13 +220,15 @@ namespace cAlgo.Robots
 
             try
             {
-                _triggerTimeInServerTimeZone = NI.UtcDateTime.Add(TimeZone.BaseUtcOffset);
+                TimeSpan ts = new TimeSpan(0, 4, 0, 0);
+                TimeSpan ts2 = ts.Add(System.TimeZoneInfo.Local.BaseUtcOffset).Add(TimeZone.BaseUtcOffset);
+                _triggerTimeInServerTimeZone = NI.UtcDateTime.Add(ts2);
             } catch (Exception e)
             {
-                Log("Exception: {0}", e.Message);
+                Log("Exception5: {0}", e.Message);
             }
 
-            if (!_ordersCreated)
+            if (!_ordersCreated && !ShowNewsOnly)
             {
                 //ExecuteMarketOrder(TradeType.Sell, Symbol, 1000, Label, null, 1);
                 //ExecuteMarketOrder(TradeType.Buy, Symbol, 1000, Label, null, 1);
@@ -369,7 +380,9 @@ namespace cAlgo.Robots
 
         private NewsItem DisplayUpcomingNews()
         {
-            var upcomingNews = _newsItems.Where(x => x.UtcDateTime >= DateTime.UtcNow).Take(EventsToDisplay).ToList();
+            var upcomingNews = new List<NewsItem>();
+            upcomingNews = _newsItems.Where(x => x.UtcDateTime >= DateTime.Now.AddHours(-6)).Take(EventsToDisplay).ToList();
+            //Print("upcomming news count: {0}", upcomingNews.First().Event);
 
             var utcOffset = TimeZone.BaseUtcOffset;
 
@@ -404,6 +417,7 @@ namespace cAlgo.Robots
 
                 var dateStr = (newsItem.UtcDateTime.Add(utcOffset)).ToString("ddd HH:mm");
                 string news = string.Format("{0} - {1} - {2}", newsItem.Currency, dateStr, newsItem.Event);
+
 
                 ChartObjects.DrawText("NewsItem" + objectId++.ToString(), verticalTab + "  " + news, (StaticPosition)Position, color);
                 verticalTab += Environment.NewLine;
@@ -510,9 +524,9 @@ namespace cAlgo.Robots
     {
         private readonly ILogger _logger;
 
-        //sample url: "http://www.dailyfx.com/files/Calendar-01-06-2013.csv;
+        //sample url: "http://edu.tenforward.io/csvs/Calendar-01-28-2018.csv;
 
-        const string urlBase = "http://www.dailyfx.com/files/";
+        const string urlBase = "http://edu.tenforward.io/csvs/";
         const string urlFromat = "Calendar-{0:D2}-{1:D2}-{2}.csv";
 
         public DailyFxDownloader(ILogger logger)
@@ -599,7 +613,7 @@ namespace cAlgo.Robots
         }
 
         /// <summary>
-        /// Parses DailyFx csv data
+        /// Parses tenforward for csv data
         /// </summary>
         /// <param name="fileDate"></param>
         /// <param name="csvData"></param>
@@ -621,8 +635,13 @@ namespace cAlgo.Robots
                         var timeStr = fields[i++];
 
                         newsItem.UtcDateTime = GetDateTime(fileDate, dateStr, timeStr);
-                        newsItem.TimeZone = fields[i++];
+                        newsItem.TimeZone = "";
                         newsItem.Currency = fields[i++].ToUpper();
+
+                        //parse importance
+                        var importance = fields[i++].ToLower();
+                        newsItem.Importance = ParsingUtil.ParseImportance(importance);
+
                         var newsEvent = fields[i++];
                         //if event start with currency - remove it
                         if (newsEvent.StartsWith(newsItem.Currency + " "))
@@ -631,10 +650,6 @@ namespace cAlgo.Robots
                         }
 
                         newsItem.Event = newsEvent;
-
-                        //parse importance
-                        var importance = fields[i++].ToLower();
-                        newsItem.Importance = ParsingUtil.ParseImportance(importance);
 
                         newsItem.Actual = fields[i++];
                         newsItem.Forecast = fields[i++];
@@ -651,10 +666,11 @@ namespace cAlgo.Robots
         {
             try
             {
-                var dateTab = dateStr.Split(' ');
+                var dateTab = dateStr.Split('/');
 
                 //sample date - Sun Nov 3
-                var month = DateTime.ParseExact(dateTab[1], "MMM", null).Month;
+                var month = int.Parse(dateTab[1]);
+                //DateTime.ParseExact(dateTab[1], "MMM", null).Month;
                 var day = int.Parse(dateTab[2]);
 
                 var year = fileDate.Year;
@@ -695,13 +711,13 @@ namespace cAlgo.Robots
 
             importance = importance.ToLower();
 
-            if (importance == "high")
+            if (importance == "h")
                 return Importance.High;
 
-            if (importance == "low")
+            if (importance == "l")
                 return Importance.Low;
 
-            if (importance == "medium")
+            if (importance == "m")
                 return Importance.Medium;
 
             return null;
@@ -710,10 +726,12 @@ namespace cAlgo.Robots
 
     public class NewsRepository
     {
+
         public static List<T> FilterNews<T>(List<T> newsItems, bool showLow, bool showMedium, bool showHigh, bool symbolFilter, SymbolWrapper symbol) where T : INewsItem
         {
             //improtance filter               
             var importanceFilter = new List<Importance>();
+            var newsI = new List<T>();
             if (showLow)
                 importanceFilter.Add(Importance.Low);
 
@@ -723,7 +741,7 @@ namespace cAlgo.Robots
             if (showHigh)
                 importanceFilter.Add(Importance.High);
 
-            newsItems = newsItems.Where(x => x.Importance.HasValue && importanceFilter.Contains(x.Importance.Value)).OrderBy(x => x.UtcDateTime).ToList();
+            newsI = newsItems.Where(x => x.Importance.HasValue && importanceFilter.Contains(x.Importance.Value)).OrderBy(x => x.UtcDateTime).ToList();
 
             if (symbolFilter)
             {
@@ -734,10 +752,9 @@ namespace cAlgo.Robots
                     symbol.QuoteCurrency
                 };
 
-                newsItems = newsItems.Where(x => currencyFilter.Contains(x.Currency)).ToList();
+                newsI = newsI.Where(x => currencyFilter.Contains(x.Currency)).ToList();
             }
-
-            return newsItems;
+            return newsI;
         }
 
         public static List<NewsGroup<T>> GroupNews<T>(List<T> newsList, SymbolWrapper symbol) where T : INewsItem
