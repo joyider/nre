@@ -7,8 +7,10 @@
 //News Robot Enhanced (NRE)
 //
 //André Karlsson   <andre@sess.se>
-//Version 0.8a
-//Will place news trades based on data downloaded from dailyFX.com
+//Version 0.9.01b
+//Will place news trades based on data downloaded from forexfactory calendar
+//Data is parsed and hosted on edu.tenforward.io/csvs/Calendar-dd-mm-yyyy.csv
+//Where date is first Sunday of week (US. style / Sunday is first day)
 //
 //* Place orders based on High/Meedium/Low news importance
 //* Show historical news events onscreen
@@ -30,7 +32,7 @@ using HorizontalAlignment = cAlgo.API.HorizontalAlignment;
 
 namespace cAlgo.Robots
 {
-    [Robot(TimeZone = TimeZones.NCentralAsiaStandardTime, AccessRights = AccessRights.FullAccess)]
+    [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.FullAccess)]
     public class NRE : Robot, ILogger
     {
         private SymbolWrapper _symbol;
@@ -144,10 +146,8 @@ namespace cAlgo.Robots
             try
             {
                 NI = DisplayUpcomingNews();
-                TimeSpan ts = new TimeSpan(0, 4, 0, 0);
-                TimeSpan ts2 = ts.Add(System.TimeZoneInfo.Local.BaseUtcOffset).Add(TimeZone.BaseUtcOffset);
-                Log("Offset from Local: {0}", ts2);
-                _triggerTimeInServerTimeZone = NI.UtcDateTime.Add(ts2);
+
+                _triggerTimeInServerTimeZone = NI.UtcDateTime;
             } catch (Exception e)
             {
                 Log("Exception2: {0}", e.Message);
@@ -220,9 +220,8 @@ namespace cAlgo.Robots
 
             try
             {
-                TimeSpan ts = new TimeSpan(0, 4, 0, 0);
-                TimeSpan ts2 = ts.Add(System.TimeZoneInfo.Local.BaseUtcOffset).Add(TimeZone.BaseUtcOffset);
-                _triggerTimeInServerTimeZone = NI.UtcDateTime.Add(ts2);
+
+                _triggerTimeInServerTimeZone = NI.UtcDateTime;
             } catch (Exception e)
             {
                 Log("Exception5: {0}", e.Message);
@@ -381,10 +380,7 @@ namespace cAlgo.Robots
         private NewsItem DisplayUpcomingNews()
         {
             var upcomingNews = new List<NewsItem>();
-            upcomingNews = _newsItems.Where(x => x.UtcDateTime >= DateTime.Now.AddHours(-6)).Take(EventsToDisplay).ToList();
-            //Print("upcomming news count: {0}", upcomingNews.First().Event);
-
-            var utcOffset = TimeZone.BaseUtcOffset;
+            upcomingNews = _newsItems.Where(x => x.UtcDateTime >= DateTime.UtcNow).Take(EventsToDisplay).ToList();
 
             //remove old objects
             for (int i = 0; i < EventsToDisplay; i++)
@@ -415,7 +411,9 @@ namespace cAlgo.Robots
                         break;
                 }
 
-                var dateStr = (newsItem.UtcDateTime.Add(utcOffset)).ToString("ddd HH:mm");
+
+                //Create The Newsstring with datetime on Current timezone (localmachine)
+                var dateStr = (newsItem.UtcDateTime.Add(System.TimeZoneInfo.Local.BaseUtcOffset)).ToString("ddd HH:mm");
                 string news = string.Format("{0} - {1} - {2}", newsItem.Currency, dateStr, newsItem.Event);
 
 
@@ -423,7 +421,7 @@ namespace cAlgo.Robots
                 verticalTab += Environment.NewLine;
             }
             //return the next upcomming event.
-            //TODO: Don't trust DailFX, verify that this is the next upcoming order
+            //TODO: Don't trust CSV data, verify that this is the next upcoming order
             return upcomingNews.First();
         }
 
@@ -621,6 +619,23 @@ namespace cAlgo.Robots
         private List<NewsItem> ParseDailyFxCsv(DateTime fileDate, string csvData)
         {
             var list = new List<NewsItem>();
+            var tzs = new List<TimeZoneInfo>();
+
+            // Diff EST to UTC Diff
+            // This is very very very nasty should use time zones!!! will fail on EST Day Time Saving
+            var ts_est_utc = new TimeSpan(0, -5, 0, 0);
+
+            //Highjacking the TimeZones from the system since the Robot does something the the default Timezone, and I don't want to spend more time on this
+
+            tzs = System.TimeZoneInfo.GetSystemTimeZones().ToList();
+            foreach (TimeZoneInfo tz in tzs)
+            {
+                if (tz.Id == "Eastern Standard Time")
+                {
+                    //If we have a match overwrite the static value with the offset
+                    ts_est_utc = tz.BaseUtcOffset;
+                }
+            }
 
             using (var reader = new StringReader(csvData))
             {
@@ -634,7 +649,7 @@ namespace cAlgo.Robots
                         var dateStr = fields[i++];
                         var timeStr = fields[i++];
 
-                        newsItem.UtcDateTime = GetDateTime(fileDate, dateStr, timeStr);
+                        newsItem.UtcDateTime = GetDateTime(fileDate, dateStr, timeStr).Subtract(ts_est_utc);
                         newsItem.TimeZone = "";
                         newsItem.Currency = fields[i++].ToUpper();
 
